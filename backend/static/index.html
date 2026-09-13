@@ -1,0 +1,862 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+	<meta charset="UTF-8">
+	<title>CS2 HUD</title>
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Teko:wght@500;600;700&family=Inter:wght@400;600&display=swap">
+	<style>
+		:root {
+			--ct-color: #6badf5;
+			--t-color: #e8a33d;
+			--bg: #0a0c0f;
+			--panel: #14171c;
+			--panel-alt: #1a1e24;
+			--border: #262b33;
+			--text: #e8e8ea;
+			--text-dim: #767c87;
+			--hp-good: #6fd15c;
+			--hp-warn: #e8a33d;
+			--hp-bad: #e5484d;
+			--panel-width: 340px;
+		}
+
+		* {
+			box-sizing: border-box;
+		}
+
+		html, body {
+			height: 100%;
+		}
+
+		body {
+			/* Escala geral do HUD pensando em 1920x1080 (referência) até
+			   1280x720 (mínimo suportado) como Browser Source no OBS — não
+			   redesenha nada, só amplia/reduz tudo de forma uniforme (fontes,
+			   espaçamentos, chanfros). `zoom` funciona no Chromium (OBS e
+			   Chrome/Edge usam esse motor); não tem efeito no Firefox, que
+			   não suporta essa propriedade. Os degraus abaixo (1600/1366/1280)
+			   não são estritamente proporcionais no menor deles — preferimos
+			   legibilidade garantida em 1280x720 a fidelidade matemática. */
+			zoom: 1.18;
+			background: var(--bg);
+			color: var(--text);
+			font-family: "Inter", "Segoe UI", Arial, sans-serif;
+			margin: 0;
+			display: grid;
+			grid-template-columns: var(--panel-width) 1fr var(--panel-width);
+			grid-template-rows: auto auto 1fr;
+			grid-template-areas:
+				"topbar topbar topbar"
+				"history history history"
+				"left    mid     right";
+			gap: 10px;
+			padding: 32px 16px 16px 16px;
+		}
+
+		/* Degraus de escala entre a referência (1920) e o mínimo suportado
+		   (1280) — mesma composição, só menor. Ordem importa: o último que
+		   bater vence, então vai do mais largo pro mais estreito. */
+		@media (max-width: 1919px) {
+			body {
+				zoom: 1;
+			}
+		}
+
+		@media (max-width: 1599px) {
+			body {
+				zoom: 0.9;
+			}
+		}
+
+		@media (max-width: 1365px) {
+			body {
+				zoom: 0.85;
+			}
+		}
+
+		/* Abaixo desse tamanho, os dois painéis de 300px + meio vazio não
+		   cabem — empilha tudo numa coluna só, como uma página normal.
+		   O "meio vazio" só faz sentido no layout de overlay (OBS). */
+		@media (max-width: 720px) {
+			body {
+				grid-template-columns: 1fr;
+				grid-template-rows: auto auto auto auto auto;
+				grid-template-areas:
+					"topbar"
+					"history"
+					"left"
+					"right"
+					"observed";
+				padding: 16px;
+			}
+
+			.team {
+				align-self: auto;
+				margin-top: 0;
+			}
+
+			#observed-player {
+				grid-area: observed;
+				align-self: auto;
+				justify-self: stretch;
+			}
+		}
+
+		/* a área do meio fica vazia (mostra a gameplay atrás no OBS), exceto
+		   pelo card do player observado, ancorado no rodapé dela */
+		#observed-player {
+			grid-area: mid;
+			align-self: end;
+			justify-self: center;
+			display: none;
+			flex-direction: column;
+			gap: 4px;
+			background: var(--panel);
+			border: 1px solid var(--border);
+			border-left: 3px solid var(--side-color);
+			padding: 8px 20px;
+			clip-path: polygon(
+				8px 0, calc(100% - 8px) 0, 100% 8px,
+				100% calc(100% - 8px), calc(100% - 8px) 100%, 8px 100%,
+				0 calc(100% - 8px), 0 8px
+			);
+		}
+
+		#observed-player.visible {
+			display: flex;
+		}
+
+		#observed-player.side-CT {
+			--side-color: var(--ct-color);
+		}
+
+		#observed-player.side-T {
+			--side-color: var(--t-color);
+		}
+
+		.observed-caption {
+			font-size: 9px;
+			letter-spacing: 1.5px;
+			text-transform: uppercase;
+			color: var(--text-dim);
+		}
+
+		#observed-player .player {
+			padding: 0;
+			border-bottom: none;
+			border-radius: 0;
+			gap: 16px;
+		}
+
+		#observed-player .avatar {
+			display: none;
+		}
+
+		#observed-player .player-name {
+			font-family: "Teko", sans-serif;
+			font-size: 24px;
+			font-weight: 600;
+			letter-spacing: 1px;
+		}
+
+		#observed-player .hp-number {
+			font-size: 34px;
+		}
+
+		#observed-player .player-sub-row {
+			font-size: 12px;
+			gap: 14px;
+		}
+
+		#observed-player .player-money {
+			color: var(--text-dim) !important;
+		}
+
+		#observed-player .player.dead {
+			opacity: 0.6;
+			filter: grayscale(0.75);
+		}
+
+		#observed-player .player.dead .player-name {
+			text-decoration: none;
+		}
+
+		#connection-banner {
+			grid-column: 1 / -1;
+			display: none;
+			text-align: center;
+			background: var(--hp-bad);
+			color: #fff;
+			font-size: 12px;
+			font-weight: 600;
+			letter-spacing: 1px;
+			text-transform: uppercase;
+			padding: 6px;
+			border-radius: 6px;
+		}
+
+		#connection-banner.visible {
+			display: block;
+		}
+
+		#top-bar {
+			grid-area: topbar;
+			display: flex;
+			justify-content: center;
+			align-items: stretch;
+			max-width: 420px;
+			margin: 0 auto;
+			width: 100%;
+			gap: 3px;
+		}
+
+		#round-history {
+			grid-area: history;
+			display: flex;
+			justify-content: center;
+			gap: 5px;
+			flex-wrap: wrap;
+			margin-top: 8px;
+		}
+
+		.round-pip {
+			width: 13px;
+			height: 13px;
+			background-color: currentColor;
+			-webkit-mask-repeat: no-repeat;
+			mask-repeat: no-repeat;
+			-webkit-mask-position: center;
+			mask-position: center;
+			-webkit-mask-size: contain;
+			mask-size: contain;
+		}
+
+		.round-pip.ct {
+			color: var(--ct-color);
+		}
+
+		.round-pip.t {
+			color: var(--t-color);
+		}
+
+		.round-pip.reason-bomb {
+			-webkit-mask-image: url("icons/bomb.svg");
+			mask-image: url("icons/bomb.svg");
+		}
+
+		.round-pip.reason-defuse {
+			-webkit-mask-image: url("icons/defuse.svg");
+			mask-image: url("icons/defuse.svg");
+		}
+
+		.round-pip.reason-elimination {
+			-webkit-mask-image: url("icons/skull.svg");
+			mask-image: url("icons/skull.svg");
+		}
+
+		.round-pip.reason-time {
+			-webkit-mask-image: url("icons/time.svg");
+			mask-image: url("icons/time.svg");
+		}
+
+		.team-block {
+			flex: 1;
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			justify-content: center;
+			gap: 1px;
+			padding: 5px 14px;
+			position: relative;
+			background: var(--panel);
+			border: 1px solid var(--border);
+			border-bottom: 2px solid transparent;
+		}
+
+		.team-block.ct {
+			border-bottom-color: var(--ct-color);
+			clip-path: polygon(6px 0, 100% 0, 94% 100%, 6px 100%, 0 calc(100% - 6px), 0 6px);
+		}
+
+		.team-block.t {
+			border-bottom-color: var(--t-color);
+			clip-path: polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% calc(100% - 6px), calc(100% - 6px) 100%, 6% 100%);
+		}
+
+		.team-label {
+			order: 1;
+			font-family: "Teko", sans-serif;
+			font-size: 11px;
+			font-weight: 600;
+			letter-spacing: 1.5px;
+			text-transform: uppercase;
+			color: var(--text-dim);
+		}
+
+		.team-block.ct .team-label {
+			color: var(--ct-color);
+		}
+
+		.team-block.t .team-label {
+			color: var(--t-color);
+		}
+
+		.team-block .score {
+			order: 2;
+			font-family: "Teko", sans-serif;
+			font-size: 44px;
+			font-weight: 700;
+			line-height: 0.9;
+			color: var(--text);
+		}
+
+		.team-block.ct .score {
+			text-shadow: 0 0 6px rgba(107, 173, 245, 0.5);
+		}
+
+		.team-block.t .score {
+			text-shadow: 0 0 6px rgba(232, 163, 61, 0.5);
+		}
+
+		#round-box {
+			text-align: center;
+			min-width: 100px;
+			padding: 4px 14px 3px 14px;
+			display: flex;
+			flex-direction: column;
+			justify-content: center;
+			background: var(--panel-alt);
+			border: 1px solid var(--border);
+			clip-path: polygon(
+				8px 0, calc(100% - 8px) 0, 100% 8px,
+				100% calc(100% - 8px), calc(100% - 8px) 100%, 8px 100%,
+				0 calc(100% - 8px), 0 8px
+			);
+		}
+
+		#round-box .label {
+			font-size: 8px;
+			text-transform: uppercase;
+			letter-spacing: 1.5px;
+			color: var(--text-dim);
+			display: block;
+		}
+
+		#map-name {
+			display: block;
+			margin-bottom: 3px;
+			font-size: 8px;
+			font-weight: 600;
+			color: var(--text-dim);
+			letter-spacing: 1px;
+			opacity: 0.7;
+		}
+
+		#round {
+			font-family: "Teko", sans-serif;
+			font-size: 32px;
+			font-weight: 700;
+			line-height: 0.95;
+			color: var(--text);
+		}
+
+		#bomb {
+			display: block;
+			margin-top: 5px;
+			font-size: 9px;
+			letter-spacing: 1px;
+			text-transform: uppercase;
+			color: var(--text-dim);
+			transition: color 0.2s ease;
+		}
+
+		#bomb.planted {
+			color: var(--hp-bad);
+			animation: pulse 1s infinite;
+		}
+
+		@keyframes pulse {
+			0%, 100% { opacity: 1; }
+			50% { opacity: 0.4; }
+		}
+
+		#mode-badge {
+			display: block;
+			margin-top: 3px;
+			font-size: 9px;
+			letter-spacing: 1.5px;
+			text-transform: uppercase;
+			padding: 2px 8px;
+			border-radius: 999px;
+			border: 1px solid var(--border);
+			color: var(--text-dim);
+		}
+
+		#mode-badge.spectating {
+			color: var(--hp-warn);
+			border-color: var(--hp-warn);
+		}
+
+		#mode-badge.warmup {
+			color: var(--text);
+			border-color: var(--text-dim);
+			background: rgba(255, 255, 255, 0.06);
+		}
+
+		.team {
+			background: var(--panel);
+			border: 1px solid var(--border);
+			overflow: hidden;
+			height: fit-content;
+			align-self: center;
+			margin-top: 60px;
+			clip-path: polygon(
+				8px 0, calc(100% - 8px) 0, 100% 8px,
+				100% calc(100% - 8px), calc(100% - 8px) 100%, 8px 100%,
+				0 calc(100% - 8px), 0 8px
+			);
+		}
+
+		.team.side-CT {
+			--side-color: var(--ct-color);
+			grid-area: left;
+		}
+
+		.team.side-T {
+			--side-color: var(--t-color);
+			grid-area: right;
+		}
+
+		.team h2 {
+			margin: 0;
+			padding: 6px 12px;
+			font-family: "Teko", sans-serif;
+			font-size: 15px;
+			font-weight: 600;
+			text-transform: uppercase;
+			letter-spacing: 2px;
+			color: var(--side-color);
+			background: var(--panel);
+			border-bottom: 2px solid var(--side-color);
+		}
+
+		.players {
+			padding: 4px;
+		}
+
+		/* --- painéis laterais: sobrescreve só dentro de .team, sem tocar
+		   nas regras base (o card do player observado usa as mesmas classes
+		   e não pode mudar) --- */
+		.team .player {
+			border-left: 3px solid var(--side-color);
+			border-radius: 0;
+			padding-left: 9px;
+		}
+
+		.team .player:nth-child(even) {
+			background: transparent;
+		}
+
+		.team .avatar {
+			display: none;
+		}
+
+		.team .hp-number {
+			font-size: 22px;
+		}
+
+		.team .player.dead {
+			opacity: 0.6;
+			filter: grayscale(0.75);
+		}
+
+		.team .player.dead .player-name {
+			text-decoration: none;
+		}
+
+		.team .player-money {
+			color: var(--text-dim) !important;
+			font-weight: 600;
+		}
+
+		.team .player-sub-row {
+			justify-content: flex-start;
+			gap: 12px;
+		}
+
+		.team .player-weapon {
+			flex: 1;
+			text-align: left;
+		}
+
+		.team .player-kda,
+		.team .vest-icon,
+		.team .player-money {
+			flex-shrink: 0;
+		}
+
+		.player {
+			display: flex;
+			align-items: center;
+			gap: 8px;
+			padding: 7px 6px;
+			border-bottom: 1px solid var(--border);
+			border-radius: 4px;
+		}
+
+		.player:nth-child(even) {
+			background: rgba(255, 255, 255, 0.025);
+		}
+
+		.player:last-child {
+			border-bottom: none;
+		}
+
+		.player.dead {
+			opacity: 0.4;
+		}
+
+		.player.burning {
+			animation: fireFlicker 0.7s infinite alternate;
+		}
+
+		@keyframes fireFlicker {
+			from { background-color: rgba(255, 122, 26, 0.05); }
+			to { background-color: rgba(255, 122, 26, 0.22); }
+		}
+
+		.avatar {
+			width: 9px;
+			height: 9px;
+			border-radius: 50%;
+			background: var(--side-color);
+			box-shadow: 0 0 6px var(--side-color);
+			flex-shrink: 0;
+		}
+
+		.player-main {
+			flex: 1;
+			min-width: 0;
+		}
+
+		.player-top-row {
+			display: flex;
+			justify-content: space-between;
+			align-items: baseline;
+			gap: 6px;
+		}
+
+		.player-name {
+			font-weight: 600;
+			font-size: 13px;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+			min-width: 0;
+		}
+
+		.player.dead .player-name {
+			text-decoration: line-through;
+		}
+
+		.death-icon, .fire-icon, .flash-icon, .smoke-icon {
+			margin-left: 3px;
+		}
+
+		.hp-number {
+			font-family: "Teko", sans-serif;
+			font-size: 19px;
+			font-weight: 600;
+			line-height: 1;
+			flex-shrink: 0;
+		}
+
+		.player-sub-row {
+			display: flex;
+			justify-content: space-between;
+			gap: 6px;
+			font-size: 10px;
+			color: var(--text-dim);
+			margin-top: 2px;
+		}
+
+		.player-kda {
+			font-weight: 600;
+			flex-shrink: 0;
+		}
+
+		.player-weapon {
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+			text-transform: uppercase;
+			letter-spacing: 0.5px;
+			color: var(--text-dim);
+		}
+
+		.player-money {
+			font-weight: 600;
+			flex-shrink: 0;
+		}
+
+		.vest-icon {
+			flex-shrink: 0;
+		}
+	</style>
+</head>
+<body>
+	<div id="connection-banner">Desconectado — tentando reconectar...</div>
+
+	<div id="top-bar">
+		<div class="team-block ct">
+			<span class="team-label">CT</span>
+			<span class="score">0</span>
+		</div>
+		<div id="round-box">
+			<span id="map-name">-</span>
+			<span class="label">Round</span>
+			<div id="round">-</div>
+			<span id="bomb">Bomba não plantada</span>
+			<span id="mode-badge">Jogando</span>
+		</div>
+		<div class="team-block t">
+			<span class="score">0</span>
+			<span class="team-label">T</span>
+		</div>
+	</div>
+
+	<div id="round-history"></div>
+
+	<div class="team side-CT" id="team-CT">
+		<h2>Counter-Terrorists</h2>
+		<div class="players"></div>
+	</div>
+
+	<div class="team side-T" id="team-T">
+		<h2>Terrorists</h2>
+		<div class="players"></div>
+	</div>
+
+	<div id="observed-player">
+		<span class="observed-caption">Observando</span>
+		<div id="observed-player-content"></div>
+	</div>
+
+	<script>
+		const eventSource = new EventSource("/game-state/stream");
+
+		eventSource.onmessage = function (event) {
+			const matchState = JSON.parse(event.data);
+			render(matchState);
+		};
+
+		eventSource.onopen = function () {
+			document.getElementById("connection-banner").classList.remove("visible");
+		};
+
+		eventSource.onerror = function () {
+			document.getElementById("connection-banner").classList.add("visible");
+		};
+
+		function render(matchState) {
+			document.getElementById("round").textContent = matchState.round;
+			document.getElementById("map-name").textContent = formatMapName(matchState.map);
+			renderBomb(matchState.c4);
+			renderModeBadge(matchState.spectating, matchState.warmup);
+			renderRoundHistory(matchState.roundHistory);
+			renderTeam("CT", matchState.teams.CT);
+			renderTeam("T", matchState.teams.T);
+			renderObservedPlayer(matchState.spectating, matchState.observedPlayer);
+		}
+
+		function renderObservedPlayer(spectating, player) {
+			const el = document.getElementById("observed-player");
+			const content = document.getElementById("observed-player-content");
+
+			if (!spectating || !player || !player.nome) {
+				el.classList.remove("visible");
+				return;
+			}
+
+			el.className = "side-" + player.team;
+			el.classList.add("visible");
+			content.innerHTML = "";
+			const row = renderPlayer(player);
+			applyStatusBackground(row, player);
+			content.appendChild(row);
+		}
+
+		const ROUND_REASON_LABEL = {
+			"bomb": "Bomba explodiu",
+			"defuse": "Bomba defusada",
+			"elimination": "Eliminação",
+			"time": "Tempo esgotado",
+		};
+
+		function renderRoundHistory(roundHistory) {
+			const el = document.getElementById("round-history");
+			el.innerHTML = "";
+
+			(roundHistory || []).forEach(function (result) {
+				const pip = document.createElement("span");
+				pip.className = "round-pip " + result.winner.toLowerCase() + " reason-" + result.reason;
+				pip.title = result.winner + " — " + (ROUND_REASON_LABEL[result.reason] || result.reason);
+				el.appendChild(pip);
+			});
+		}
+
+		function renderBomb(c4) {
+			const bomb = document.getElementById("bomb");
+			bomb.classList.toggle("planted", c4.planted);
+			bomb.textContent = c4.planted ? "Bomba plantada" : "Bomba não plantada";
+		}
+
+		function renderModeBadge(spectating, warmup) {
+			const badge = document.getElementById("mode-badge");
+			badge.classList.toggle("spectating", spectating && !warmup);
+			badge.classList.toggle("warmup", warmup);
+
+			if (warmup) {
+				badge.textContent = "Aquecimento";
+			} else {
+				badge.textContent = spectating ? "Espectando" : "Jogando";
+			}
+		}
+
+		function renderTeam(side, team) {
+			const teamEl = document.getElementById("team-" + side);
+			if (!team) return;
+
+			document.querySelector(".team-block." + side.toLowerCase() + " .score").textContent = team.score;
+
+			const playersEl = teamEl.querySelector(".players");
+			playersEl.innerHTML = "";
+
+			const players = team.players ? Object.values(team.players) : [];
+			players.forEach(function (player) {
+				const row = renderPlayer(player);
+				applyStatusBackground(row, player);
+				playersEl.appendChild(row);
+			});
+		}
+
+		function renderPlayer(player) {
+			const div = document.createElement("div");
+			div.className = "player" + (player.alive ? "" : " dead") + (player.burning > 0 ? " burning" : "");
+
+			const avatar = document.createElement("span");
+			avatar.className = "avatar";
+
+			const main = document.createElement("div");
+			main.className = "player-main";
+
+			const topRow = document.createElement("div");
+			topRow.className = "player-top-row";
+
+			const name = document.createElement("span");
+			name.className = "player-name";
+			name.textContent = player.nome;
+			if (!player.alive) {
+				name.appendChild(iconSpan("death-icon", "💀"));
+			} else if (player.burning > 0) {
+				name.appendChild(iconSpan("fire-icon", "🔥"));
+			} else if (player.flashed > 0) {
+				name.appendChild(iconSpan("flash-icon", "⚡"));
+			} else if (player.smoked > 0) {
+				name.appendChild(iconSpan("smoke-icon", "💨"));
+			}
+
+			const hp = document.createElement("span");
+			hp.className = "hp-number";
+			hp.textContent = player.alive ? player.hp : "";
+			hp.style.color = hpColor(player.hp);
+
+			topRow.appendChild(name);
+			topRow.appendChild(hp);
+
+			const subRow = document.createElement("div");
+			subRow.className = "player-sub-row";
+
+			const kda = document.createElement("span");
+			kda.className = "player-kda";
+			kda.textContent = player.kills + "/" + player.deaths + "/" + player.assists;
+
+			const weapon = document.createElement("span");
+			weapon.className = "player-weapon";
+			weapon.textContent = formatWeapon(player.primaryWeapon) || formatWeapon(player.secondaryWeapon) || "-";
+
+			const vest = document.createElement("span");
+			vest.className = "vest-icon";
+			vest.textContent = player.vest > 0 ? "🛡" + player.vest : "";
+
+			const money = document.createElement("span");
+			money.className = "player-money";
+			money.textContent = "$" + player.money;
+			money.style.color = moneyColor(player.money);
+
+			subRow.appendChild(kda);
+			subRow.appendChild(weapon);
+			subRow.appendChild(vest);
+			subRow.appendChild(money);
+
+			main.appendChild(topRow);
+			main.appendChild(subRow);
+
+			div.appendChild(avatar);
+			div.appendChild(main);
+			return div;
+		}
+
+		function iconSpan(className, symbol) {
+			const span = document.createElement("span");
+			span.className = className;
+			span.textContent = symbol;
+			return span;
+		}
+
+		// Flash e smoke: clareamento simples da row via background-color.
+		// Molotov usa a classe "burning" (CSS puro, @keyframes fireFlicker).
+		// Morto usa a classe "dead" (opacidade reduzida). Mesmo comportamento
+		// nos painéis e no card do observado, já que os dois chamam essa
+		// mesma função depois de montar a linha.
+		function applyStatusBackground(row, player) {
+			row.style.backgroundColor = statusEffectBackground(player.flashed, player.smoked);
+		}
+
+		function statusEffectBackground(flashed, smoked) {
+			const flashIntensity = (flashed || 0) / 255;
+			if (flashIntensity > 0) {
+				return "rgba(255, 255, 255, " + Math.min(1, flashIntensity).toFixed(3) + ")";
+			}
+			const smokeIntensity = (smoked || 0) / 255;
+			if (smokeIntensity > 0) {
+				return "rgba(160, 160, 160, " + (smokeIntensity * 0.6).toFixed(3) + ")";
+			}
+			return "";
+		}
+
+		function hpColor(hp) {
+			if (hp > 60) return "var(--hp-good)";
+			if (hp > 25) return "var(--hp-warn)";
+			return "var(--hp-bad)";
+		}
+
+		function moneyColor(money) {
+			if (money >= 4000) return "var(--hp-good)";
+			if (money >= 2000) return "var(--hp-warn)";
+			return "var(--hp-bad)";
+		}
+
+		function formatMapName(mapName) {
+			if (!mapName) return "-";
+			return mapName.toUpperCase();
+		}
+
+		function formatWeapon(weaponName) {
+			if (!weaponName) return "";
+			return weaponName.replace("weapon_", "").replaceAll("_", " ");
+		}
+	</script>
+</body>
+</html>

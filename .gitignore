@@ -1,0 +1,30 @@
+# Binários compilados (go build/go run não geram nada aqui, mas cobre o caso)
+/backend/cs2-hud
+/backend/backend
+/backend/main
+/backend/server
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Testes/artefatos do Go
+*.test
+*.out
+
+# Variáveis de ambiente e segredos
+.env
+.env.local
+
+# Editores/IDEs
+.vscode/
+.idea/
+*.swp
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

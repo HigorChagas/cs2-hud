@@ -19,10 +19,8 @@ var roundHistory []models.RoundResult
 var spectatingState bool
 var missingAllPlayersStreak int
 
-// O CS2 nem sempre manda "allplayers" em todo heartbeat (só quando há
-// mudança), então um único request sem esse campo não significa que parou
-// de espectar. Só desliga o estado depois de algumas atualizações seguidas
-// sem "allplayers" — assim o badge não fica piscando.
+var bombCarrier *string
+
 func updateSpectatingState(hasAllPlayers bool) bool {
 	if hasAllPlayers {
 		missingAllPlayersStreak = 0
@@ -37,20 +35,61 @@ func updateSpectatingState(hasAllPlayers bool) bool {
 	return spectatingState
 }
 
-// Se o placar voltou pra 0-0 mas ainda temos histórico de rounds guardado,
-// é sinal de que uma partida nova começou (mapa reiniciado, troca de partida)
-// sem o servidor ser reiniciado — limpa o histórico da partida anterior.
+func updateBombCarrier(payload models.CS2Payload) *string {
+	if payload.Round.Bomb == "planted" {
+		bombCarrier = nil
+		return bombCarrier
+	}
+
+	if len(payload.AllPlayers) > 0 {
+		bombCarrier = findCarrierAmong(payload.AllPlayers)
+		return bombCarrier
+	}
+
+	if hasC4(payload.Player.Weapons) {
+		name := payload.Player.Name
+		bombCarrier = &name
+		return bombCarrier
+	}
+
+	if bombCarrier != nil && *bombCarrier == payload.Player.Name {
+		bombCarrier = nil
+	}
+
+	return bombCarrier
+}
+
+func findCarrierAmong(players map[string]models.CS2Player) *string {
+	for _, p := range players {
+		if hasC4(p.Weapons) {
+			name := p.Name
+			return &name
+		}
+	}
+	return nil
+}
+
+func hasC4(weapons map[string]models.CS2Weapon) bool {
+	for _, w := range weapons {
+		if w.Type == "C4" {
+			return true
+		}
+	}
+	return false
+}
+
 func resetRoundHistoryIfNewMatch(totalRoundsPlayed int) {
 	if totalRoundsPlayed == 0 && len(roundHistory) > 0 {
 		roundHistory = nil
 	}
 }
 
-// O GSI manda "round.phase":"over" + "round.win_team" várias vezes seguidas
-// enquanto o round está terminando, e o contador "map.round" às vezes já
-// avança pro próximo round antes do phase sair de "over" — não dá pra confiar
-// nele pra evitar duplicata. O placar (soma dos scores) só sobe quando um
-// round é realmente fechado, então usamos ele como fonte da verdade.
+func resetBombCarrierIfNewMatch(totalRoundsPlayed int) {
+	if totalRoundsPlayed == 0 {
+		bombCarrier = nil
+	}
+}
+
 func recordRoundResult(round models.CS2Round, teams map[string]models.Team, totalRoundsPlayed int) {
 	if round.Phase != "over" || round.WinTeam == "" {
 		return
@@ -66,9 +105,6 @@ func recordRoundResult(round models.CS2Round, teams map[string]models.Team, tota
 	roundHistory = append(roundHistory, result)
 }
 
-// O GSI não manda um "motivo" explícito pro fim do round, então a gente
-// infere: bomba explodiu/foi defusada vêm direto de round.bomb; senão,
-// olha se o time perdedor ficou com todos mortos (eliminação) ou não (tempo).
 func roundOutcomeReason(round models.CS2Round, teams map[string]models.Team, winner string) string {
 	switch round.Bomb {
 	case "exploded":
@@ -114,7 +150,11 @@ func createMatchStateHandler(w http.ResponseWriter, r *http.Request) {
 
 	mu.Lock()
 	matchState.Spectating = updateSpectatingState(len(match.AllPlayers) > 0)
+
 	totalRoundsPlayed := match.Map.TeamCT.Score + match.Map.TeamT.Score
+	resetBombCarrierIfNewMatch(totalRoundsPlayed)
+	matchState.C4.Carrier = updateBombCarrier(match)
+
 	resetRoundHistoryIfNewMatch(totalRoundsPlayed)
 	recordRoundResult(match.Round, matchState.Teams, totalRoundsPlayed)
 	matchState.RoundHistory = roundHistory
@@ -177,8 +217,6 @@ func streamMatchStateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// Enquanto o frontend ainda está mudando bastante, evita que o navegador
-// sirva uma versão antiga do index.html/JS do cache do disco.
 func noCache(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")

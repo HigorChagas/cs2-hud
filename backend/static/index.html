@@ -30,14 +30,6 @@
 		}
 
 		body {
-			/* Escala geral do HUD pensando em 1920x1080 (referência) até
-			   1280x720 (mínimo suportado) como Browser Source no OBS — não
-			   redesenha nada, só amplia/reduz tudo de forma uniforme (fontes,
-			   espaçamentos, chanfros). `zoom` funciona no Chromium (OBS e
-			   Chrome/Edge usam esse motor); não tem efeito no Firefox, que
-			   não suporta essa propriedade. Os degraus abaixo (1600/1366/1280)
-			   não são estritamente proporcionais no menor deles — preferimos
-			   legibilidade garantida em 1280x720 a fidelidade matemática. */
 			zoom: 1.18;
 			background: var(--bg);
 			color: var(--text);
@@ -54,9 +46,6 @@
 			padding: 32px 16px 16px 16px;
 		}
 
-		/* Degraus de escala entre a referência (1920) e o mínimo suportado
-		   (1280) — mesma composição, só menor. Ordem importa: o último que
-		   bater vence, então vai do mais largo pro mais estreito. */
 		@media (max-width: 1919px) {
 			body {
 				zoom: 1;
@@ -75,9 +64,6 @@
 			}
 		}
 
-		/* Abaixo desse tamanho, os dois painéis de 300px + meio vazio não
-		   cabem — empilha tudo numa coluna só, como uma página normal.
-		   O "meio vazio" só faz sentido no layout de overlay (OBS). */
 		@media (max-width: 720px) {
 			body {
 				grid-template-columns: 1fr;
@@ -103,8 +89,6 @@
 			}
 		}
 
-		/* a área do meio fica vazia (mostra a gameplay atrás no OBS), exceto
-		   pelo card do player observado, ancorado no rodapé dela */
 		#observed-player {
 			grid-area: mid;
 			align-self: end;
@@ -404,6 +388,18 @@
 			background: rgba(255, 255, 255, 0.06);
 		}
 
+		#mode-badge.gameover {
+			color: var(--text-dim);
+			border-color: var(--text-dim);
+			background: rgba(255, 255, 255, 0.06);
+		}
+
+		#mode-badge.freezetime {
+			color: var(--text-dim);
+			border-color: var(--text-dim);
+			background: rgba(255, 255, 255, 0.06);
+		}
+
 		.team {
 			background: var(--panel);
 			border: 1px solid var(--border);
@@ -445,9 +441,6 @@
 			padding: 4px;
 		}
 
-		/* --- painéis laterais: sobrescreve só dentro de .team, sem tocar
-		   nas regras base (o card do player observado usa as mesmas classes
-		   e não pode mudar) --- */
 		.team .player {
 			border-left: 3px solid var(--side-color);
 			border-radius: 0;
@@ -603,6 +596,23 @@
 		.vest-icon {
 			flex-shrink: 0;
 		}
+
+		.carrier-icon {
+			display: inline-block;
+			width: 10px;
+			height: 10px;
+			margin-left: 3px;
+			vertical-align: middle;
+			background-color: currentColor;
+			-webkit-mask-image: url("icons/bomb.svg");
+			mask-image: url("icons/bomb.svg");
+			-webkit-mask-repeat: no-repeat;
+			mask-repeat: no-repeat;
+			-webkit-mask-position: center;
+			mask-position: center;
+			-webkit-mask-size: contain;
+			mask-size: contain;
+		}
 	</style>
 </head>
 <body>
@@ -660,17 +670,17 @@
 		};
 
 		function render(matchState) {
-			document.getElementById("round").textContent = matchState.round;
+			document.getElementById("round").textContent = matchState.warmup ? "-" : matchState.round;
 			document.getElementById("map-name").textContent = formatMapName(matchState.map);
-			renderBomb(matchState.c4);
-			renderModeBadge(matchState.spectating, matchState.warmup);
-			renderRoundHistory(matchState.roundHistory);
-			renderTeam("CT", matchState.teams.CT);
-			renderTeam("T", matchState.teams.T);
-			renderObservedPlayer(matchState.spectating, matchState.observedPlayer);
+			renderBomb(matchState.c4, matchState.warmup);
+			renderModeBadge(matchState.spectating, matchState.warmup, matchState.gameOver, matchState.freezeTime);
+			renderRoundHistory(matchState.warmup ? [] : matchState.roundHistory);
+			renderTeam("CT", matchState.teams.CT, matchState.c4.carrier);
+			renderTeam("T", matchState.teams.T, matchState.c4.carrier);
+			renderObservedPlayer(matchState.spectating, matchState.observedPlayer, matchState.c4.carrier);
 		}
 
-		function renderObservedPlayer(spectating, player) {
+		function renderObservedPlayer(spectating, player, carrierName) {
 			const el = document.getElementById("observed-player");
 			const content = document.getElementById("observed-player-content");
 
@@ -682,7 +692,7 @@
 			el.className = "side-" + player.team;
 			el.classList.add("visible");
 			content.innerHTML = "";
-			const row = renderPlayer(player);
+			const row = renderPlayer(player, carrierName);
 			applyStatusBackground(row, player);
 			content.appendChild(row);
 		}
@@ -706,25 +716,36 @@
 			});
 		}
 
-		function renderBomb(c4) {
+		function renderBomb(c4, warmup) {
 			const bomb = document.getElementById("bomb");
+			if (warmup) {
+				bomb.classList.remove("planted");
+				bomb.textContent = "";
+				return;
+			}
 			bomb.classList.toggle("planted", c4.planted);
 			bomb.textContent = c4.planted ? "Bomba plantada" : "Bomba não plantada";
 		}
 
-		function renderModeBadge(spectating, warmup) {
+		function renderModeBadge(spectating, warmup, gameOver, freezeTime) {
 			const badge = document.getElementById("mode-badge");
-			badge.classList.toggle("spectating", spectating && !warmup);
-			badge.classList.toggle("warmup", warmup);
+			badge.classList.toggle("gameover", gameOver);
+			badge.classList.toggle("warmup", !gameOver && warmup);
+			badge.classList.toggle("freezetime", !gameOver && !warmup && freezeTime);
+			badge.classList.toggle("spectating", !gameOver && !warmup && !freezeTime && spectating);
 
-			if (warmup) {
+			if (gameOver) {
+				badge.textContent = "FIM DE JOGO";
+			} else if (warmup) {
 				badge.textContent = "Aquecimento";
+			} else if (freezeTime) {
+				badge.textContent = "COMPRANDO";
 			} else {
 				badge.textContent = spectating ? "Espectando" : "Jogando";
 			}
 		}
 
-		function renderTeam(side, team) {
+		function renderTeam(side, team, carrierName) {
 			const teamEl = document.getElementById("team-" + side);
 			if (!team) return;
 
@@ -735,13 +756,13 @@
 
 			const players = team.players ? Object.values(team.players) : [];
 			players.forEach(function (player) {
-				const row = renderPlayer(player);
+				const row = renderPlayer(player, carrierName);
 				applyStatusBackground(row, player);
 				playersEl.appendChild(row);
 			});
 		}
 
-		function renderPlayer(player) {
+		function renderPlayer(player, carrierName) {
 			const div = document.createElement("div");
 			div.className = "player" + (player.alive ? "" : " dead") + (player.burning > 0 ? " burning" : "");
 
@@ -765,6 +786,12 @@
 				name.appendChild(iconSpan("flash-icon", "⚡"));
 			} else if (player.smoked > 0) {
 				name.appendChild(iconSpan("smoke-icon", "💨"));
+			}
+
+			if (player.alive && carrierName && player.nome === carrierName) {
+				const bombIcon = document.createElement("span");
+				bombIcon.className = "carrier-icon";
+				name.appendChild(bombIcon);
 			}
 
 			const hp = document.createElement("span");
@@ -815,11 +842,6 @@
 			return span;
 		}
 
-		// Flash e smoke: clareamento simples da row via background-color.
-		// Molotov usa a classe "burning" (CSS puro, @keyframes fireFlicker).
-		// Morto usa a classe "dead" (opacidade reduzida). Mesmo comportamento
-		// nos painéis e no card do observado, já que os dois chamam essa
-		// mesma função depois de montar a linha.
 		function applyStatusBackground(row, player) {
 			row.style.backgroundColor = statusEffectBackground(player.flashed, player.smoked);
 		}

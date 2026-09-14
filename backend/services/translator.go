@@ -11,14 +11,13 @@ func TranslateMatchState(payload models.CS2Payload) models.MatchState {
 		Map:            payload.Map.Name,
 		Teams:          teams,
 		C4:             translateC4(payload.Round),
-		Spectating:     len(payload.AllPlayers) > 0,
 		Warmup:         payload.Map.Phase == "warmup",
+		GameOver:       payload.Map.Phase == "gameover",
+		FreezeTime:     payload.Round.Phase == "freezetime",
 		ObservedPlayer: TranslatePlayer(payload.Player),
 	}
 }
 
-// Espectando/observando, o CS2 manda "allplayers" com todo mundo; jogando
-// ativamente, ele só manda o "player" local. Usa o que estiver disponível.
 func assignPlayers(teams map[string]models.Team, payload models.CS2Payload) {
 	if len(payload.AllPlayers) > 0 {
 		for _, p := range payload.AllPlayers {
@@ -90,8 +89,6 @@ func translateWeapons(weapons map[string]models.CS2Weapon) (primary, primaryType
 	return primary, primaryType, secondary, secondaryType, utilities
 }
 
-// Faca e C4 não são armas/utilidades do HUD: a faca todo mundo sempre tem,
-// e a C4 já é representada por MatchState.C4, não pelo inventário do player.
 func isIgnored(weaponType string) bool {
 	return weaponType == "Knife" || weaponType == "C4"
 }

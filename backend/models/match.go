@@ -30,12 +30,13 @@ type Player struct {
 
 type MatchState struct {
 	Round          int             `json:"round"`
-	RoundTime      int             `json:"roundTime"`
 	Map            string          `json:"map"`
 	Teams          map[string]Team `json:"teams"`
 	C4             C4              `json:"c4"`
 	Spectating     bool            `json:"spectating"`
 	Warmup         bool            `json:"warmup"`
+	GameOver       bool            `json:"gameOver"`
+	FreezeTime     bool            `json:"freezeTime"`
 	RoundHistory   []RoundResult   `json:"roundHistory"`
 	ObservedPlayer Player          `json:"observedPlayer"`
 }
